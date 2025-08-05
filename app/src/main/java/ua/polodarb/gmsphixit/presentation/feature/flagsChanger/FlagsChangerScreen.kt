@@ -8,18 +8,30 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.*
 import ua.polodarb.gmsphixit.core.phixit.model.ParcelableFlagModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -32,6 +44,43 @@ fun FlagsChangerScreen(
 ) {
     val state by viewModel::state
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    
+    var showDropdownMenu by remember { mutableStateOf(false) }
+
+    // File pickers for import/export
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { 
+            val jsonData = viewModel.exportFlagsSync()
+            if (jsonData != null) {
+                try {
+                    context.contentResolver.openOutputStream(it)?.use { outputStream ->
+                        outputStream.write(jsonData.toByteArray())
+                    }
+                    viewModel.state = viewModel.state.copy(importExportMessage = "Flags exported successfully")
+                } catch (e: Exception) {
+                    viewModel.state = viewModel.state.copy(error = "Failed to save export file: ${e.message}")
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            try {
+                context.contentResolver.openInputStream(it)?.use { inputStream ->
+                    val jsonData = inputStream.readBytes().toString(Charsets.UTF_8)
+                    viewModel.importFlags(jsonData)
+                }
+            } catch (e: Exception) {
+                viewModel.state = viewModel.state.copy(error = "Failed to read import file: ${e.message}")
+            }
+        }
+    }
 
     LaunchedEffect(packageName) {
         viewModel.loadFlags(packageName)
@@ -61,6 +110,49 @@ fun FlagsChangerScreen(
                         )
                     ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    Box {
+                        IconButton(
+                            onClick = { showDropdownMenu = true },
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        
+                        DropdownMenu(
+                            expanded = showDropdownMenu,
+                            onDismissRequest = { showDropdownMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Export Flags") },
+                                onClick = {
+                                    showDropdownMenu = false
+                                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                                    val fileName = "flags_${packageName}_$timestamp.json"
+                                    exportLauncher.launch(fileName)
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FileDownload, contentDescription = null)
+                                },
+                                enabled = !state.isExporting && !state.isImporting
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Import Flags") },
+                                onClick = {
+                                    showDropdownMenu = false
+                                    importLauncher.launch(arrayOf("application/json"))
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FileUpload, contentDescription = null)
+                                },
+                                enabled = !state.isExporting && !state.isImporting
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -137,6 +229,37 @@ fun FlagsChangerScreen(
                             Spacer(Modifier.weight(1f))
                             TextButton(
                                 onClick = { viewModel.clearError() }
+                            ) {
+                                Text("Dismiss")
+                            }
+                        }
+                    }
+                }
+
+                state.importExportMessage?.let { message ->
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TextButton(
+                                onClick = { viewModel.clearImportExportMessage() }
                             ) {
                                 Text("Dismiss")
                             }

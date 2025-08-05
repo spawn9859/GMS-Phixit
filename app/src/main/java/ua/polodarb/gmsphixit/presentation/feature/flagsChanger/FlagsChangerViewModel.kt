@@ -145,6 +145,106 @@ class FlagsChangerViewModel @Inject constructor(
     fun clearError() {
         state = state.copy(error = null)
     }
+
+    fun exportFlags(): String? {
+        return try {
+            state = state.copy(isExporting = true, importExportMessage = null)
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val phixitService = rootDB.getRootDatabase()
+                    val jsonData = phixitService.exportFlags(currentPackageName)
+                    launch(Dispatchers.Main) {
+                        state = state.copy(
+                            isExporting = false,
+                            importExportMessage = "Flags exported successfully"
+                        )
+                        clearMessageAfterDelay()
+                    }
+                    // Return the JSON data for external handling (like file save)
+                    jsonData
+                } catch (e: Exception) {
+                    launch(Dispatchers.Main) {
+                        state = state.copy(
+                            isExporting = false,
+                            error = "Failed to export flags: ${e.message}"
+                        )
+                    }
+                    null
+                }
+            }
+            null // Will be handled asynchronously
+        } catch (e: Exception) {
+            state = state.copy(
+                isExporting = false,
+                error = "Failed to export flags: ${e.message}"
+            )
+            null
+        }
+    }
+
+    fun exportFlagsSync(): String? {
+        return try {
+            val phixitService = rootDB.getRootDatabase()
+            phixitService.exportFlags(currentPackageName)
+        } catch (e: Exception) {
+            state = state.copy(error = "Failed to export flags: ${e.message}")
+            null
+        }
+    }
+
+    fun importFlags(jsonData: String) {
+        if (jsonData.isBlank()) {
+            state = state.copy(error = "No data to import")
+            return
+        }
+
+        state = state.copy(isImporting = true, importExportMessage = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val phixitService = rootDB.getRootDatabase()
+                val success = phixitService.importFlags(currentPackageName, jsonData)
+                
+                if (success) {
+                    // Reload flags to show the imported ones
+                    val updatedFlags = phixitService.getBoolFlags(currentPackageName).distinctBy { it.name }
+                    launch(Dispatchers.Main) {
+                        state = state.copy(
+                            isImporting = false,
+                            flags = updatedFlags,
+                            importExportMessage = "Flags imported successfully"
+                        )
+                        filterFlags()
+                        clearMessageAfterDelay()
+                    }
+                } else {
+                    launch(Dispatchers.Main) {
+                        state = state.copy(
+                            isImporting = false,
+                            error = "Failed to import flags: Invalid data or no suitable partitions found"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                launch(Dispatchers.Main) {
+                    state = state.copy(
+                        isImporting = false,
+                        error = "Failed to import flags: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearImportExportMessage() {
+        state = state.copy(importExportMessage = null)
+    }
+
+    private fun clearMessageAfterDelay() {
+        viewModelScope.launch {
+            delay(3000) // Clear message after 3 seconds
+            state = state.copy(importExportMessage = null)
+        }
+    }
 }
 
 data class FlagsChangerState(
@@ -156,5 +256,8 @@ data class FlagsChangerState(
     val error: String? = null,
     val showAddDialog: Boolean = false,
     val newFlagName: String = "",
-    val newFlagValue: Boolean = false
+    val newFlagValue: Boolean = false,
+    val isExporting: Boolean = false,
+    val isImporting: Boolean = false,
+    val importExportMessage: String? = null
 )

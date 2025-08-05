@@ -13,6 +13,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
 import io.requery.android.database.sqlite.SQLiteDatabase.openDatabase
 import ua.polodarb.gmsphixit.utils.ZipUtils
 import ua.polodarb.gmsphixit.core.phixit.model.BaseFlagModel
+import ua.polodarb.gmsphixit.core.phixit.model.FlagExportModel
 import ua.polodarb.gmsphixit.core.phixit.model.ParcelableFlagModel
 import ua.polodarb.gmsphixit.core.phixit.model.toParcelable
 import java.io.ByteArrayOutputStream
@@ -108,6 +109,67 @@ class PhixitFlagsService : RootService() {
                 gmsDatabase.version
             } catch (e: Exception) {
                 -1
+            }
+        }
+
+        override fun exportFlags(packageName: String?): String {
+            val safeName = packageName ?: ""
+            Log.i(LOG_TAG, "exportFlags called for: $safeName")
+            
+            return try {
+                val flags = dumpFlags(safeName).values.flatten()
+                val exportModel = FlagExportModel(
+                    packageName = safeName,
+                    exportTimestamp = System.currentTimeMillis(),
+                    flags = flags
+                )
+                kotlinx.serialization.json.Json.encodeToString(FlagExportModel.serializer(), exportModel)
+            } catch (e: Exception) {
+                Log.e(LOG_TAG, "Error exporting flags: ${e.message}", e)
+                throw e
+            }
+        }
+
+        override fun importFlags(packageName: String?, jsonData: String?): Boolean {
+            val safeName = packageName ?: return false
+            val safeData = jsonData ?: return false
+            Log.i(LOG_TAG, "importFlags called for: $safeName")
+            
+            return try {
+                val exportModel = kotlinx.serialization.json.Json.decodeFromString(FlagExportModel.serializer(), safeData)
+                
+                // Group flags by partition ID
+                val currentFlags = dumpFlags(safeName)
+                val importedFlagsMap = mutableMapOf<Int, List<BaseFlagModel>>()
+                
+                // Try to match imported flags to existing partitions
+                exportModel.flags.forEach { importedFlag ->
+                    val targetPartition = currentFlags.entries.find { (_, flags) ->
+                        flags.any { it::class == importedFlag::class }
+                    }?.key
+                    
+                    if (targetPartition != null) {
+                        val existing = importedFlagsMap[targetPartition] ?: emptyList()
+                        importedFlagsMap[targetPartition] = existing + importedFlag
+                    }
+                }
+                
+                // If no matching partitions found, use the first available partition
+                if (importedFlagsMap.isEmpty() && currentFlags.isNotEmpty()) {
+                    val firstPartition = currentFlags.keys.first()
+                    importedFlagsMap[firstPartition] = exportModel.flags
+                }
+                
+                if (importedFlagsMap.isNotEmpty()) {
+                    encodeAndSave(safeName, importedFlagsMap)
+                    true
+                } else {
+                    Log.w(LOG_TAG, "No suitable partitions found for import")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e(LOG_TAG, "Error importing flags: ${e.message}", e)
+                false
             }
         }
 
