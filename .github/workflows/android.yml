@@ -11,33 +11,177 @@ on:
       - development
       - main
       - master
+  workflow_dispatch:
+    inputs:
+      require_approval:
+        description: 'Require manual approval before build'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
+  # Manual approval job (only runs when manually triggered with approval required)
+  approval:
+    if: github.event_name == 'workflow_dispatch' && inputs.require_approval
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Manual Approval Required
+        run: |
+          echo "Build requires manual approval. Please approve in the GitHub Actions UI."
+          echo "This will pause the workflow until approval is granted."
+
   build:
     runs-on: ubuntu-latest
+    needs: [approval]
+    if: always() && (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '11'
           distribution: 'temurin'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-home-cache-cleanup: true
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v3
+
+      - name: Create google-services.json placeholder
+        run: |
+          if [ ! -f app/google-services.json ]; then
+            echo "Creating placeholder google-services.json for build"
+            cat > app/google-services.json << 'EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "placeholder-project",
+              "storage_bucket": "placeholder-project.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "ua.polodarb.gmsphixit"
+                  }
+                },
+                "oauth_client": [
+                  {
+                    "client_id": "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+                    "client_type": 3
+                  }
+                ],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": [
+                      {
+                        "client_id": "000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com",
+                        "client_type": 3
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          else
+            echo "google-services.json already exists"
+          fi
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Check Gradle and dependencies
+        run: |
+          echo "Gradle version:"
+          ./gradlew --version
+          echo "Project info:"
+          ./gradlew projects
+          echo "Dependencies check:"
+          ./gradlew dependencies --configuration debugCompileClasspath || echo "Dependencies check failed, continuing..."
+
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        id: build
+        run: |
+          echo "Starting debug APK build..."
+          set -e
+          ./gradlew assembleDebug --no-daemon --stacktrace --info
+          echo "Build completed successfully"
+          echo "build_success=true" >> $GITHUB_OUTPUT
+
+      - name: Verify APK was created
+        id: verify
+        run: |
+          APK_PATH="app/build/outputs/apk/debug"
+          if [ -d "$APK_PATH" ] && [ "$(ls -A $APK_PATH/*.apk 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "APK files found:"
+            ls -la $APK_PATH/*.apk
+            echo "apk_exists=true" >> $GITHUB_OUTPUT
+            
+            # Get APK info
+            for apk in $APK_PATH/*.apk; do
+              echo "APK: $apk"
+              echo "Size: $(stat -c%s "$apk" | numfmt --to=iec)"
+            done
+          else
+            echo "ERROR: No APK files found in $APK_PATH"
+            echo "Directory contents:"
+            ls -la app/build/outputs/ || echo "outputs directory not found"
+            echo "apk_exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
-        if: success()
+        if: steps.verify.outputs.apk_exists == 'true'
         with:
-          name: debug-apk-${{ github.run_number }}
+          name: debug-apk-${{ github.run_number }}-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
+          if-no-files-found: error
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow**: ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.build.outputs.build_success }}" == "true" ] && [ "${{ steps.verify.outputs.apk_exists }}" == "true" ]; then
+            echo "- **Status**: ✅ Build completed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- **APK**: Debug APK was created and uploaded as artifact" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status**: ❌ Build failed" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ steps.build.outputs.build_success }}" != "true" ]; then
+              echo "- **Error**: Build process failed" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "${{ steps.verify.outputs.apk_exists }}" != "true" ]; then
+              echo "- **Error**: APK file was not created" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi

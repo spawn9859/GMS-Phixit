@@ -13,6 +13,36 @@
 - Root access required
 - Fast flag search, add, and edit
 
+## 🔧 Development & Build
+
+### Debug APK Workflow
+
+This repository includes a GitHub Actions workflow for building debug APKs with the following features:
+
+- **Automatic builds** on push/PR to main branches
+- **Manual approval** option for controlled builds
+- **Comprehensive error handling** and build verification
+- **Artifact upload** with detailed build summaries
+- **Build caching** for faster subsequent builds
+
+#### Manual Build with Approval
+
+To trigger a build that requires manual approval:
+
+1. Go to **Actions** → **Android Debug Build**
+2. Click **Run workflow**
+3. Check **"Require manual approval before build"**
+4. The workflow will pause for approval before building
+
+*Note: Manual approval requires setting up a 'production' environment. See [.github/ENVIRONMENTS.md](.github/ENVIRONMENTS.md) for setup instructions.*
+
+#### Build Artifacts
+
+Successful builds upload debug APKs as GitHub artifacts with:
+- Unique naming: `debug-apk-{run_number}-{commit_sha}`
+- 30-day retention
+- Build verification and size reporting
+
 ## ⚠️ Why This App Is Currently Unusable
 ### ⚠️ ALL FLAGS RESET AFTER 24 HOURS
 
