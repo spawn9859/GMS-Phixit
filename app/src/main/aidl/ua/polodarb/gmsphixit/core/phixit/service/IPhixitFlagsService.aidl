@@ -10,6 +10,9 @@ interface IPhixitFlagsService {
     void updateFlag(String packageName, String flagName, boolean newValue);
     void addBoolFlag(String packageName, String flagName, boolean value);
 
+    String exportFlags(String packageName);
+    boolean importFlags(String packageName, String jsonData);
+
     List<String> getAllConfigPackages();
 
     int getDbVersion();
