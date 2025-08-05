@@ -16,6 +16,7 @@ import ua.polodarb.gmsphixit.core.phixit.model.BaseFlagModel
 import ua.polodarb.gmsphixit.core.phixit.model.FlagExportModel
 import ua.polodarb.gmsphixit.core.phixit.model.ParcelableFlagModel
 import ua.polodarb.gmsphixit.core.phixit.model.toParcelable
+import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
 
 class PhixitFlagsService : RootService() {
@@ -123,7 +124,7 @@ class PhixitFlagsService : RootService() {
                     exportTimestamp = System.currentTimeMillis(),
                     flags = flags
                 )
-                kotlinx.serialization.json.Json.encodeToString(FlagExportModel.serializer(), exportModel)
+                Json.encodeToString(FlagExportModel.serializer(), exportModel)
             } catch (e: Exception) {
                 Log.e(LOG_TAG, "Error exporting flags: ${e.message}", e)
                 throw e
@@ -136,7 +137,7 @@ class PhixitFlagsService : RootService() {
             Log.i(LOG_TAG, "importFlags called for: $safeName")
             
             return try {
-                val exportModel = kotlinx.serialization.json.Json.decodeFromString(FlagExportModel.serializer(), safeData)
+                val exportModel = Json.decodeFromString(FlagExportModel.serializer(), safeData)
                 
                 // Group flags by partition ID
                 val currentFlags = dumpFlags(safeName)

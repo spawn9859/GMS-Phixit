@@ -59,9 +59,9 @@ fun FlagsChangerScreen(
                     context.contentResolver.openOutputStream(it)?.use { outputStream ->
                         outputStream.write(jsonData.toByteArray())
                     }
-                    viewModel.state = viewModel.state.copy(importExportMessage = "Flags exported successfully")
+                    viewModel.setImportExportMessage("Flags exported successfully")
                 } catch (e: Exception) {
-                    viewModel.state = viewModel.state.copy(error = "Failed to save export file: ${e.message}")
+                    viewModel.setError("Failed to save export file: ${e.message}")
                 }
             }
         }
@@ -77,7 +77,7 @@ fun FlagsChangerScreen(
                     viewModel.importFlags(jsonData)
                 }
             } catch (e: Exception) {
-                viewModel.state = viewModel.state.copy(error = "Failed to read import file: ${e.message}")
+                viewModel.setError("Failed to read import file: ${e.message}")
             }
         }
     }

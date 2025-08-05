@@ -239,6 +239,15 @@ class FlagsChangerViewModel @Inject constructor(
         state = state.copy(importExportMessage = null)
     }
 
+    fun setImportExportMessage(message: String) {
+        state = state.copy(importExportMessage = message)
+        clearMessageAfterDelay()
+    }
+
+    fun setError(error: String) {
+        state = state.copy(error = error)
+    }
+
     private fun clearMessageAfterDelay() {
         viewModelScope.launch {
             delay(3000) // Clear message after 3 seconds
